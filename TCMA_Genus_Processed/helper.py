@@ -37,7 +37,7 @@ merged.to_csv("merged.csv", index=False)
 
 
 
-# PART 3: Keep only rows where Sample == "PT"
+# PART 3: Keep only rows where Sample == "PT" (the keeps only primary tumors)
 merged_PT = merged[merged["Sample"] == "PT"]
 
 # Save to a new CSV
