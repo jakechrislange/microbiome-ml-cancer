@@ -4,6 +4,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import roc_curve, make_scorer, recall_score, roc_auc_score, accuracy_score
 import numpy as np
 from train import train
+from train_with_bootstrap import train_with_bootstrap
+from train_with_boot_and_smote import train_with_boot_and_smote
 
 # Load the CSV you saved previously
 dataset = pd.read_csv("TCMA_Genus_Processed/final.csv")
@@ -16,8 +18,20 @@ y = dataset["project"]
 
 
 
-train()  # Train the model using only COAD and READ samples
+#train()  # Train the model using only COAD and READ samples
+# print("Training with bootstrap for different input dimensions:\n")
+# print("Input Dim: 32:\n")
+# train_with_bootstrap(second_dim=32)
+print("Second Dim: 64:\n")
+#train_with_bootstrap(second_dim=64)
 
+train_with_boot_and_smote(second_dim = 64, use_smote=True, smote_strategy='auto')
+# print("Second Dim: 128:\n")
+# train_with_boot_and_smote(second_dim = 128, use_smote=True, smote_strategy='auto')
+# print("Input Dim: 128:\n")
+# train_with_bootstrap(second_dim=128)
+# print("Input Dim: 256:\n")
+# train_with_bootstrap(second_dim=256)
 
 
 # # print("X shape:", X.shape)

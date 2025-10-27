@@ -4,15 +4,17 @@ import torch.nn as nn
 
 class MLPClassifierDeepResidual(nn.Module):
     class Block(torch.nn.Module):
-        def __init__(self, in_channels, out_channels):
+        def __init__(self, in_channels, out_channels, dropout = 0.3):
             super().__init__()
             self.model = torch.nn.Sequential(
                 torch.nn.Linear(in_channels, out_channels),
                 torch.nn.LayerNorm(out_channels),
-                torch.nn.ReLU(),
+                torch.nn.GELU(),
+                torch.nn.Dropout(dropout),
                 torch.nn.Linear(out_channels, out_channels),
                 torch.nn.LayerNorm(out_channels),
-                torch.nn.ReLU(),
+                torch.nn.GELU(),
+                torch.nn.Dropout(dropout),
             )
             if in_channels != out_channels:
                 self.skip = torch.nn.Linear(in_channels, out_channels)
@@ -25,6 +27,7 @@ class MLPClassifierDeepResidual(nn.Module):
     def __init__(
         self,
         input_dim: int = 128,
+        second_dim: int = 128,
         num_classes: int = 6,
     ):
         """
@@ -39,12 +42,12 @@ class MLPClassifierDeepResidual(nn.Module):
         """
         super().__init__()
         layers = []
-        layers.append(torch.nn.Linear(input_dim, 128))
-        layers.append(torch.nn.LayerNorm(128))
-        layers.append(torch.nn.ReLU())
-        layers.append(self.Block(128, 128))
-        layers.append(self.Block(128, 64))
-        layers.append(torch.nn.Linear(64, num_classes, bias=False))
+        layers.append(torch.nn.Linear(input_dim, second_dim))
+        layers.append(torch.nn.LayerNorm(second_dim))
+        layers.append(torch.nn.GELU())
+        layers.append(self.Block(second_dim, second_dim))
+        layers.append(self.Block(second_dim, second_dim//2))
+        layers.append(torch.nn.Linear(second_dim //2, num_classes, bias=False))
         self.model = torch.nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
