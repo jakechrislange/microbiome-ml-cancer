@@ -104,7 +104,7 @@ def train_single_fold(X_tr, y_tr, X_val, y_val, second_dim, num_classes, class_w
             auc = roc_auc_score(all_labels, all_preds[:, 1])
         else:
             auc = roc_auc_score(y_true=all_labels, y_score=all_preds, 
-                               multi_class="ovr", average="macro")
+                               multi_class="ovo", average="macro")
     except ValueError:
         auc = float("nan")
     
@@ -121,9 +121,9 @@ def train_with_boot_and_smote(second_dim=128, use_smote=True, smote_strategy='au
         smote_strategy: 'auto' (balance all), 'minority' (only minority), or dict
     """
     seed = 42
-    batch_size = 8
-    lr = 1e-3
-    num_epoch = 50
+    batch_size = 16
+    lr = 0.0001
+    num_epoch = 75
     k_folds = 5
     n_bootstrap = 10
 
@@ -240,3 +240,6 @@ def train_with_boot_and_smote(second_dim=128, use_smote=True, smote_strategy='au
         print(f"{cls}: {cls_auc_mean:.4f} (95% CI: [{cls_auc_ci[0]:.4f}, {cls_auc_ci[1]:.4f}])")
     
     return bootstrap_acc, bootstrap_auc, bootstrap_per_class_auc
+
+
+train_with_boot_and_smote()

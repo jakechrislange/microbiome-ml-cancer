@@ -7,6 +7,8 @@ from train import train
 from train_with_bootstrap import train_with_bootstrap
 from train_with_boot_and_smote import train_with_boot_and_smote
 
+from train_hyperparameter_optim import grid_search
+
 # Load the CSV you saved previously
 dataset = pd.read_csv("TCMA_Genus_Processed/final.csv")
 
@@ -22,12 +24,14 @@ y = dataset["project"]
 # print("Training with bootstrap for different input dimensions:\n")
 # print("Input Dim: 32:\n")
 # train_with_bootstrap(second_dim=32)
-print("Second Dim: 64:\n")
+#print("Second Dim: 64:\n")
 #train_with_bootstrap(second_dim=64)
 
-train_with_boot_and_smote(second_dim = 64, use_smote=True, smote_strategy='auto')
+#train_with_boot_and_smote(second_dim = 64, use_smote=True, smote_strategy='auto')
+#grid_search()
+
 # print("Second Dim: 128:\n")
-# train_with_boot_and_smote(second_dim = 128, use_smote=True, smote_strategy='auto')
+train_with_boot_and_smote(second_dim = 128, use_smote=True, smote_strategy='auto')
 # print("Input Dim: 128:\n")
 # train_with_bootstrap(second_dim=128)
 # print("Input Dim: 256:\n")
