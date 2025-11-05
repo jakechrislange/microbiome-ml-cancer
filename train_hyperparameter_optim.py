@@ -5,10 +5,11 @@ from sklearn.model_selection import train_test_split, StratifiedKFold, Parameter
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.metrics import roc_auc_score
 from sklearn.utils import resample
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SVMSMOTE, SMOTE, ADASYN
 import torch.nn.functional as F
 import numpy as np
 from itertools import combinations
+from collections import Counter
 
 
 def get_dataset():
@@ -30,7 +31,7 @@ def compute_class_weights(y):
 
 
 def apply_smote(X, y, sampling_strategy="auto", k_neighbors=5):
-    sm = SMOTE(sampling_strategy=sampling_strategy, k_neighbors=k_neighbors, random_state=42)
+    sm = SVMSMOTE(sampling_strategy=sampling_strategy, k_neighbors=k_neighbors, random_state=42)
     X_res, y_res = sm.fit_resample(X, y)
     return X_res, y_res
 
@@ -142,7 +143,7 @@ def train_kfold(second_dim=128, batch_size=8, lr=1e-3, num_epoch=50, use_smote=F
                 auc_score = float("nan")
             fold_per_class_auc[cls].append(auc_score) 
 
-        print(f"\n=== Fold {fold + 1} Pairwise AUCs (One-vs-One) ===")
+        #print(f"\n=== Fold {fold + 1} Pairwise AUCs (One-vs-One) ===")
 
         pairwise_auc = {}
         for (i, j) in combinations(range(num_classes), 2):
@@ -168,12 +169,15 @@ def train_kfold(second_dim=128, batch_size=8, lr=1e-3, num_epoch=50, use_smote=F
 
             print(f"{cls_i} vs {cls_j}: {pairwise_auc[(cls_i, cls_j)]:.4f}")
     
+    adj_score = np.nanmean(fold_auc) - np.nanstd(fold_auc)
+
     print("\n" + "="*60)
     print(f"K-Fold Cross-Validation Results ({k_folds} folds)")
     print("="*60)
     print(f"Mean Validation Accuracy: {np.mean(fold_acc):.4f}")
     print(f"Mean Validation AUC: {np.nanmean(fold_auc):.4f}")
     print(f"AUC Std: {np.nanstd(fold_auc):.4f}")
+    print(f"Adjusted Stability-Aware AUC Score: {adj_score:.4f}")
 
     return fold_acc, fold_auc, fold_per_class_auc
 
@@ -229,5 +233,132 @@ def grid_search(alpha=0.75): # High alpha to penalize variance more
 
     return all_results, best_config
 
+
+def train_single_fold_track_losses(X_tr, y_tr, X_val, y_val, second_dim, num_classes, class_weights, batch_size=8, lr=1e-3, num_epoch=50, weight_decay=1e-4):
+    train_loader = DataLoader(TensorDataset(X_tr, y_tr), batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
+    
+    model = MLPClassifierDeepResidual(input_dim=X_tr.shape[1], second_dim=second_dim, num_classes=num_classes)
+    loss_func = torch.nn.CrossEntropyLoss(weight=class_weights)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    train_loss_history = []
+    train_auc_history = []
+    val_loss_history = []
+    val_auc_history = []
+
+    for epoch in range(num_epoch):
+        model.train()
+        running_loss = 0.0
+        all_train_preds = []
+        all_train_labels = []
+
+        for x_data, y_data in train_loader:
+            x_data, y_data = x_data, y_data
+            optimizer.zero_grad()
+            pred = model(x_data)
+            loss_val = loss_func(pred, y_data)
+            loss_val.backward()
+            optimizer.step()
+
+            running_loss += loss_val.item() * x_data.size(0)
+            probs = F.softmax(pred, dim=1).detach().cpu().numpy()
+            labels = y_data.detach().cpu().numpy()
+            all_train_preds.append(probs)
+            all_train_labels.append(labels)
+
+        train_loss = running_loss / len(train_loader.dataset)
+        all_train_preds = np.concatenate(all_train_preds, axis=0)
+        all_train_labels = np.concatenate(all_train_labels, axis=0)
+        try:
+            if num_classes == 2:
+                train_auc = roc_auc_score(all_train_labels, all_train_preds[:, 1])
+            else:
+                train_auc = roc_auc_score(y_true=all_train_labels, y_score=all_train_preds, multi_class="ovo", average="macro")
+        except ValueError:
+            train_auc = float("nan")
+
+        # Validation
+        model.eval()
+        running_val_loss = 0.0
+        all_val_preds = []
+        all_val_labels = []
+
+        with torch.inference_mode():
+            for x_data, y_data in val_loader:
+                x_data, y_data = x_data, y_data
+                pred = model(x_data)
+                loss_val = loss_func(pred, y_data)
+                running_val_loss += loss_val.item() * x_data.size(0)
+                probs = F.softmax(pred, dim=1).cpu().numpy()
+                labels = y_data.cpu().numpy()
+                all_val_preds.append(probs)
+                all_val_labels.append(labels)
+
+        val_loss = running_val_loss / len(val_loader.dataset)
+        all_val_preds = np.concatenate(all_val_preds, axis=0)
+        all_val_labels = np.concatenate(all_val_labels, axis=0)
+        try:
+            if num_classes == 2:
+                val_auc = roc_auc_score(all_val_labels, all_val_preds[:, 1])
+            else:
+                val_auc = roc_auc_score(y_true=all_val_labels, y_score=all_val_preds, multi_class="ovo", average="macro")
+        except ValueError:
+            val_auc = float("nan")
+
+        # Store metrics
+        train_loss_history.append(train_loss)
+        train_auc_history.append(train_auc)
+        val_loss_history.append(val_loss)
+        val_auc_history.append(val_auc)
+
+        print(f"Epoch {epoch+1}/{num_epoch} - Train loss: {train_loss:.4f}, Train AUC: {train_auc:.4f} | Val loss: {val_loss:.4f}, Val AUC: {val_auc:.4f}")
+
+    return train_loss_history, train_auc_history, val_loss_history, val_auc_history
+
+
 #grid_search()
-train_kfold(256, 16, 0.0001, 75, use_smote=True, smote_strategy="auto", smote_k_neighbors=5, weight_decay=1e-4)
+#train_kfold(second_dim=64, batch_size=16, lr=1e-4, num_epoch=75, use_smote=False, smote_strategy="auto", smote_k_neighbors=5, weight_decay=1e-3)
+
+
+X, y, class_names = get_dataset()
+num_classes = len(class_names)
+
+# Split once into train/test
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.15, random_state=42, stratify=y, shuffle=True
+)
+
+
+# Split once into train/test
+X_train, X_val, y_train, y_val = train_test_split(
+    X_train, y_train, test_size=0.20, random_state=42, stratify=y_train, shuffle=True
+)
+
+
+
+#X_tr_resampled, y_tr_resampled = apply_smote(X_train_reduced, y_train, sampling_strategy="auto", k_neighbors=5)
+#Convert pandas dataframes/arrays to torch tensors
+X_tr_tensor = torch.tensor(X_train.values, dtype=torch.float32)
+y_tr_tensor = torch.tensor(y_train, dtype=torch.long)
+X_val_tensor = torch.tensor(X_val.values, dtype=torch.float32)
+y_val_tensor = torch.tensor(y_val, dtype=torch.long)
+
+# Compute class weights on training set only
+class_weights = compute_class_weights(y_train)
+
+# Call train_single_fold with your desired hyperparameters
+train_loss_hist, train_auc_hist, val_loss_hist, val_auc_hist = train_single_fold_track_losses(
+    X_tr_tensor,
+    y_tr_tensor,
+    X_val_tensor,
+    y_val_tensor,
+    second_dim=64,      
+    num_classes=len(np.unique(y_train)),
+    class_weights=class_weights,
+    batch_size=16,
+    lr= 1e-4,
+    num_epoch=200,
+    weight_decay=1e-5
+)
+

@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class MLPClassifierDeepResidual(nn.Module):
     class Block(torch.nn.Module):
-        def __init__(self, in_channels, out_channels, dropout = 0.3):
+        def __init__(self, in_channels, out_channels, dropout = 0.4):
             super().__init__()
             self.model = torch.nn.Sequential(
                 torch.nn.Linear(in_channels, out_channels),
@@ -28,7 +28,7 @@ class MLPClassifierDeepResidual(nn.Module):
         self,
         input_dim: int = 128,
         second_dim: int = 128,
-        num_classes: int = 6,
+        num_classes: int = 5,
     ):
         """
         Args:
@@ -42,10 +42,12 @@ class MLPClassifierDeepResidual(nn.Module):
         """
         super().__init__()
         layers = []
-        layers.append(torch.nn.Linear(input_dim, second_dim))
-        layers.append(torch.nn.LayerNorm(second_dim))
+        layers.append(torch.nn.Linear(input_dim, second_dim*2))
+        layers.append(torch.nn.LayerNorm(second_dim*2))
         layers.append(torch.nn.GELU())
-        layers.append(self.Block(second_dim, second_dim))
+        #layers.append(self.Block(second_dim*4, second_dim*2))
+        # layers.append(self.Block(second_dim*4, second_dim*2))
+        layers.append(self.Block(second_dim*2, second_dim))
         layers.append(self.Block(second_dim, second_dim//2))
         layers.append(torch.nn.Linear(second_dim //2, num_classes, bias=False))
         self.model = torch.nn.Sequential(*layers)
