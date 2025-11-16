@@ -13,3 +13,4 @@ for i, cls in enumerate(class_names):
 plt.title("t-SNE projection of X colored by y")
 plt.legend()
 plt.show()
+
