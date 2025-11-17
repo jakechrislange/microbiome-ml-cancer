@@ -1,8 +1,8 @@
-from sklearn.svm import SVC
+from sklearn.ensemble import GradientBoostingClassifier
 from processing import get_dataset
 from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
 from sklearn.utils import resample
-from sklearn.metrics import roc_auc_score, confusion_matrix, brier_score_loss
+from sklearn.metrics import roc_auc_score, confusion_matrix, brier_score_loss, recall_score
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -28,36 +28,77 @@ X_test_scaled = pd.DataFrame(
     index=X_test.index
 )
 
+from sklearn.utils.class_weight import compute_sample_weight
+sample_weights = compute_sample_weight('balanced', y_train)
 
-#Define parameter grid and perfrom grid search for hyperparameter selection
-param_grid = {
-    'C': [0.01, 0.1, 1, 10, 25],
-    'gamma': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, "scale", "auto"],
-    'kernel': ['rbf']
+# Define parameter grid for Gradient Boosting
+# param_grid = {
+#     'n_estimators': [25, 50, 100, 200],
+#     'learning_rate': [0.0001, 0.001, 0.01, 0.05, 0.1, 0.2],
+#     'max_depth': [3, 4, 5, 6, 7],
+#     'min_samples_split': [2, 5, 10],
+#     'min_samples_leaf': [1, 2, 4],
+#     'subsample': [0.8, 0.9, 1.0]
+# }
+
+# param_grid = {
+#     'n_estimators': [50, 100, 200, 300],  # More trees with slower learning
+#     'learning_rate': [0.01, 0.05, 0.1],  # Lower learning rates
+#     'max_depth': [2, 3, 4],  # Shallower trees (3 is already chosen, go shallower)
+#     'min_samples_split': [10, 20, 30],  # Force larger splits
+#     'min_samples_leaf': [5, 10, 15],  # Force more samples per leaf
+#     'subsample': [0.7, 0.8],  # Always use stochastic boosting
+#     'max_features': ['sqrt', 0.5]  # Add feature subsampling
+# }
+# param_grid = {
+#     # Core bias–variance knobs
+#     'n_estimators': [150, 250, 350],
+#     'learning_rate': [0.03, 0.05, 0.1],
+
+#     # Tree complexity
+#     'max_depth': [3, 4, 5],              # allow moderate depth
+#     'min_samples_split': [5, 10, 20],    # not too small, not too large
+#     'min_samples_leaf': [2, 4, 8],       # smaller leaves → more flexibility
+
+#     # Regularization / shrinkage
+#     'subsample': [0.7, 0.85, 1.0],       # allow full + stochastic boosting
+#     'max_features': ['sqrt', 0.8],       # reduce features but not too harshly
+# }
+
+param_grid_refined = {
+    'n_estimators': [300, 350, 400],           # Around the previous best
+    'learning_rate': [0.02, 0.03, 0.05],      # Low learning rate
+    'max_depth': [2, 3],                       # Keep shallow
+    'min_samples_split': [5, 10, 15],          # Increase splits to reduce overfitting
+    'min_samples_leaf': [2, 4, 6],             # Slightly larger leaves
+    'subsample': [0.8, 0.9],                   # Introduce stochasticity
+    'max_features': [0.6, 0.7, 0.8]            # Feature subsampling for regularization
 }
+
+param_grid = param_grid_refined
 
 cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 # Create GridSearchCV with 5-fold cross-validation
 grid_search = GridSearchCV(
-    SVC(probability=True, class_weight='balanced'),
+    GradientBoostingClassifier(random_state=42),
     param_grid,
     cv=cv,
     scoring='roc_auc',
-    verbose=0,
+    verbose=1,
     n_jobs=-1
 )
 
 # Fit the grid search to the training data
-grid_search.fit(X_train_scaled, y_train)
+# grid_search.fit(X_train_scaled, y_train)
+grid_search.fit(X_train_scaled, y_train, sample_weight=sample_weights)
 
 print("Best hyperparameters:", grid_search.best_params_)
-best_c = grid_search.best_params_['C']
-best_gamma = grid_search.best_params_['gamma']
-print("Best C:", best_c)
-print("Best gamma:", best_gamma)
 print("Best cross-validated score:", grid_search.best_score_)
 
+#exit(1)
+
+best_params = grid_search.best_params_
 
 n_bootstrap = 1000
 k_folds = 5
@@ -75,22 +116,25 @@ for boot_iter in range(n_bootstrap):
     
     for train_idx, val_idx in kf.split(X_boot, y_boot):
         X_tr, X_val = X_boot.iloc[train_idx], X_boot.iloc[val_idx]
-        y_tr, y_val = y_boot[train_idx], y_boot[val_idx]  # Regular numpy indexing
+        y_tr, y_val = y_boot[train_idx], y_boot[val_idx]
         
-        # Fit SVM on the bootstrap fold
-        svm = SVC(kernel='rbf', gamma=best_gamma, C=best_c, probability=True, class_weight='balanced')
-        svm.fit(X_tr, y_tr)
+        fold_sample_weights = compute_sample_weight('balanced', y_tr)
 
-        # Predict and score (ROC AUC recommended for imbalance)
-        y_val_proba = svm.predict_proba(X_val)[:, 1]
-        y_val_pred = svm.predict(X_val)
+        # Fit Gradient Boosting on the bootstrap fold
+        gbc = GradientBoostingClassifier(**best_params, random_state=boot_iter)
+        gbc.fit(X_tr, y_tr, sample_weight=fold_sample_weights)
+        
+
+        # Predict and score
+        y_val_proba = gbc.predict_proba(X_val)[:, 1]
+        y_val_pred = gbc.predict(X_val)
         try:
             score = roc_auc_score(y_val, y_val_proba)
         except ValueError:
-            continue  # Skip if ROC AUC can't be computed
+            continue
         fold_scores.append(score)
 
-        cm = confusion_matrix(y_val, y_val_pred, labels=[0, 1]) # or use class_names if you prefer
+        cm = confusion_matrix(y_val, y_val_pred, labels=[0, 1])
         all_conf_matrices.append(cm)
     
     # Store the mean cross-validated value for this bootstrap iteration
@@ -107,7 +151,7 @@ print(f"95% confidence interval: [{lower:.4f}, {upper:.4f}]")
 mean_conf_matrix = np.mean(all_conf_matrices, axis=0)
 print("Average Confusion Matrix:\n", mean_conf_matrix)
 
-# Normalize rows (e.g., to get percentage per-class; each row sums to 1)
+# Normalize rows
 row_sums = mean_conf_matrix.sum(axis=1, keepdims=True)
 norm_conf_matrix = np.divide(mean_conf_matrix, row_sums, where=row_sums!=0)
 
@@ -119,12 +163,13 @@ sns.heatmap(norm_conf_matrix, annot=True, fmt=".2f",
             cmap='Blues', ax=ax)
 ax.set_xlabel('Predicted')
 ax.set_ylabel('True')
+plt.title('Bootstrap CV Confusion Matrix')
 plt.show()
 
 
 # HOLD OUT SET: 
-best_model = SVC(kernel='rbf', gamma=best_gamma, C=best_c, probability=True, class_weight='balanced')
-best_model.fit(X_train_scaled, y_train)
+best_model = GradientBoostingClassifier(**best_params, random_state=42)
+best_model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
 
 # Predict on holdout test set
 y_test_proba = best_model.predict_proba(X_test_scaled)[:, 1]
@@ -157,26 +202,18 @@ import shap
 print("STARTING SHAP")
 
 # ============ SHAP ANALYSIS ============
-
-# Define wrapper that converts arrays to DataFrames
-def model_predict(x):
-    if isinstance(x, np.ndarray):
-        x = pd.DataFrame(x, columns=feature_names)
-    return best_model.predict_proba(x)[:, 1]
-
-# Use SCALED data for background
-background = shap.sample(X_train_scaled, 100, random_state=42)
-
-# Create explainer with wrapper
-explainer = shap.KernelExplainer(
-    model=model_predict,  # Use the wrapper, not a lambda
-    data=background
-)
+# Use TreeExplainer for tree-based models (much faster than KernelExplainer)
+explainer = shap.TreeExplainer(best_model)
 
 # Calculate SHAP values
 shap_values = explainer.shap_values(X_test_scaled)
 
-# Plot with X_test DataFrame (has feature names) but values match X_test_scaled
+# For binary classification, shap_values might be a list [class_0, class_1]
+# We want the SHAP values for the positive class (READ)
+if isinstance(shap_values, list):
+    shap_values = shap_values[1]
+
+# Plot summary
 shap.summary_plot(shap_values, X_test_scaled, plot_type="bar", show=False)
 plt.title("SHAP Feature Importance (READ vs COAD)")
 plt.tight_layout()
@@ -192,7 +229,6 @@ for i, idx in enumerate(top_idx, 1):
     importance = feature_importance[idx]
     print(f"{i}. {genus_name}: {importance:.4f}")
 
-
 # For each top feature, calculate mean SHAP value (not absolute)
 for idx in top_idx:
     genus_name = feature_names[idx]
@@ -204,13 +240,12 @@ for idx in top_idx:
         print(f"{genus_name}: Higher abundance → COAD")
 
 
-#### Calibrartion and Brier Score ####
+#### Calibration and Brier Score ####
 
 brier = brier_score_loss(y_test, y_test_proba)
 print(f"Brier score: {brier:.4f}")
 
-
-fraction_of_positives, mean_predicted_value = calibration_curve(y_test, y_test_proba, n_bins=5)
+fraction_of_positives, mean_predicted_value = calibration_curve(y_test, y_test_proba, n_bins=5, strategy='quantile')
 
 plt.figure(figsize=(8,6))
 plt.plot(mean_predicted_value, fraction_of_positives, "s-", label="Model calibration")
@@ -222,9 +257,7 @@ plt.legend()
 plt.grid(True)
 plt.show()
 
-# Apply threshold adjust to try accounting for class imbalance -- GHOST: https://pubmed.ncbi.nlm.nih.gov/34100609/
-
-from sklearn.metrics import recall_score
+# Apply threshold adjustment (GHOST method)
 
 train_proba = best_model.predict_proba(X_train_scaled)[:, 1]
 
@@ -244,10 +277,8 @@ for thresh in thresholds:
 
 print("Optimized threshold:", best_threshold)
 
-
 test_proba = best_model.predict_proba(X_test_scaled)[:, 1]
 test_pred_ghost = (test_proba >= best_threshold).astype(int)
-
 
 test_roc_auc = roc_auc_score(y_test, y_test_proba)
 print(f"Test set ROC AUC (unaffected by GHOST): {test_roc_auc:.4f}")
@@ -270,8 +301,12 @@ ax.set_ylabel('True')
 plt.title('Holdout Test Set Confusion Matrix after GHOST')
 plt.show()
 
-# With threshold adjustment we need near-chance results, highlight the similarities between READ and COAD
-# and the difficulties in distinguishing them. I think this is good to keep and report on. 
+# Also show feature importance from the model itself
+feature_importance_gbc = best_model.feature_importances_
+top_idx_gbc = np.argsort(feature_importance_gbc)[::-1][:10]
 
-# With the Ghost determined threshold we get near random results. This gives us a Confusion Matrix
-# thats more accurate considering the class imbalance
+print("\nTop 10 features by Gradient Boosting feature importance:")
+for i, idx in enumerate(top_idx_gbc, 1):
+    genus_name = feature_names[idx]
+    importance = feature_importance_gbc[idx]
+    print(f"{i}. {genus_name}: {importance:.4f}")

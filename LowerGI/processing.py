@@ -1,5 +1,6 @@
 import pandas as pd
 from imblearn.over_sampling import SVMSMOTE
+from sklearn.model_selection import train_test_split
 
 def get_dataset():
     # Load and filter for Lower GI cancers
@@ -11,9 +12,19 @@ def get_dataset():
     start_idx = dataset.columns.get_loc("HistologicalType") + 1
     X = dataset.iloc[:, start_idx:] 
     X = X.loc[:, (X != 0).any(axis=0)]
-    y = dataset["project"].astype("category").cat.codes.values
+    y = dataset["project"].astype("category").cat.codes.values # Encodes alphabetically - ex. COAD is 0 and READ is 1
     class_names = dataset["project"].astype("category").cat.categories
-    return X, y, class_names
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.15, random_state=42, stratify=y, shuffle=True
+    )
+    feature_names = X_train.columns.tolist()
+
+    print("Class distribution:")
+    print(pd.Series(y_train).value_counts())
+    print(pd.Series(y_train).value_counts(normalize=True))
+
+    return X, y, class_names, X_train, X_test, y_train, y_test, feature_names
 
 
 def get_lower_gi_stats():
