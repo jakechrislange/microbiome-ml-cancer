@@ -8,7 +8,10 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import calibration_curve
+from sklearn.metrics import roc_curve
+#from processing import apply_pca_95
 
 # Get dataset and split between train and test
 X, y, class_names, X_train, X_test, y_train, y_test, feature_names = get_dataset()
@@ -28,36 +31,127 @@ X_test_scaled = pd.DataFrame(
     index=X_test.index
 )
 
+# lasso = LogisticRegression(penalty='l1', solver='liblinear', max_iter=1000)
+# lasso.fit(X_train_scaled, y_train)
+# from sklearn.feature_selection import SelectFromModel
+# lasso_selector = SelectFromModel(lasso, prefit=True)
+# X_new_lasso = lasso_selector.transform(X_train)
+
+# X_train_scaled = X_new_lasso
+# X_test_scaled = lasso_selector.transform(X_test_scaled)
+
 from sklearn.utils.class_weight import compute_sample_weight
 sample_weights = compute_sample_weight('balanced', y_train)
 
 
 # Define parameter grid and perform grid search for hyperparameter selection
-param_grid = {
-    'hidden_layer_sizes': [(5,), (10, 5), (10,), (20,), (10,10)],
-    'alpha': [0.0001, 0.001],
-    'learning_rate_init': [0.0001, 0.001, 0.01],
-    'activation': ['relu', 'tanh'],
-    'solver': ['adam'],
-    #'learning_rate': ['constant', 'adaptive'] # only used with 'sgd' solver
-}
+# param_grid = {
+#     'hidden_layer_sizes': [(5,), (10, 5), (10,), (20,), (10,10)],
+#     'alpha': [0.0001, 0.001],
+#     'learning_rate_init': [0.0001, 0.001, 0.01],
+#     'activation': ['relu', 'tanh'],
+#     'solver': ['adam'],
+#     #'learning_rate': ['constant', 'adaptive'] # only used with 'sgd' solver
+# }
+# param_grid = {
+#     'hidden_layer_sizes': [(5,), (10,), (10, 5), (5, 5)],
+#     'alpha': [0.001, 0.01],
+#     'learning_rate_init': [0.0005, 0.001, 0.005],
+#     'activation': ['relu'],
+#     'solver': ['adam'],
+#     'max_iter': [150, 300, 500],  # For stability
+#     'early_stopping': [True],
+# }
+# param_grid = {
+#     'hidden_layer_sizes': [(20,), (50,), (50, 20), (100, 50), (50, 50, 20)],
+#     'alpha': [1e-5, 1e-4, 0.001, 0.01, 0.1],
+#     'learning_rate_init': [1e-4, 5e-4, 0.001, 0.005, 0.01],
+#     'activation': ['relu'],
+#     'solver': ['adam'],
+#     'max_iter': [300, 500, 1000],
+#     'early_stopping': [True],
+# }
+
+
+## COMPLEX GRID ###
+
 # param_grid = {
 #     'hidden_layer_sizes': [
 #         (16,), (32,), 
 #         (16, 16), (32, 16), (32, 64, 64, 16), (32, 64, 16)
 #     ],
 #     'alpha': [1e-4, 3e-4, 1e-3],
-#     'activation': ['relu', 'tanh'],
-#     'solver': ['adam', 'lbfgs'],
+#     'activation': ['relu'],
+#     'solver': ['adam',],
 #     'learning_rate_init': [1e-2, 1e-3, 3e-4],  # stable for Adam
+#     'max_iter': [300, 500, 1000],
+#     'early_stopping': [True],
 # }
 
+
+# GARBAGE
+# param_grid = {
+#     'hidden_layer_sizes': [(5,), (10,)],
+#     'alpha': [0.1, 1.0],
+#     'learning_rate_init': [0.001],
+#     'activation': ['relu'],
+#     'solver': ['lbfgs'],  # Often more stable
+#     'max_iter': [500],
+#     'early_stopping': [True],
+# }
+
+# SIMPLE GRID
+param_grid = {
+    'hidden_layer_sizes': [
+        (2,),       # Simpler single layer for very small samples
+        (5,),       # Small single layer
+        (10,),      # Slightly larger layer
+        (5, 2),     # Two small layers
+    ],
+    'alpha': [0.1, 1.0, 5.0, 10.0, 50.0],            # Strong regularization
+    'learning_rate_init': [0.00001,0.0001,0.0005, 0.001],           # Conservative rates for stability
+    'activation': ['relu'],                  # Try both non-linearities
+    'solver': ['lbfgs', 'adam'],                     # lbfgs (good for small data), adam (robust for larger)
+    'max_iter': [50, 75, 100], #200, 500],                          # Fewer epochs to avoid overfitting
+    'early_stopping': [True],                        # Built-in validation for training stop
+    # 'validation_fraction': [0.1, 0.2],               # Use decent holdout for early stopping
+}
+
+
+
+# param_grid = {
+#     # Start MUCH simpler - your data may not support deep networks
+#     'hidden_layer_sizes': [
+#         (5,),      # Single tiny layer
+#         (10,),     # Single small layer
+#         (20,),     # Single medium layer
+#         (10, 5),   # Two small layers
+#     ],
+    
+#     # Stronger regularization to prevent overfitting
+#     'alpha': [0.01, 0.1, 1.0],  # MUCH stronger regularization
+    
+#     # More conservative learning rates
+#     'learning_rate_init': [0.001, 0.01],  # Remove the very high 1e-2
+    
+#     'activation': ['relu', 'tanh'],  # Add tanh back - might help
+    
+#     'solver': ['adam', 'lbfgs'],  # Try lbfgs for small datasets
+    
+#     # Reduce iterations - you're probably overfitting
+#     'max_iter': [200, 500],
+    
+#     'early_stopping': [True],
+    
+#     # Add validation fraction for early stopping
+#     'validation_fraction': [0.1, 0.2],
+#}
 
 cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 # Create GridSearchCV with 5-fold cross-validation
 grid_search = GridSearchCV(
-    MLPClassifier(max_iter=2000, early_stopping=True, random_state=42),
+    MLPClassifier(random_state=42),
     param_grid,
     cv=cv,
     scoring='roc_auc',
@@ -66,7 +160,7 @@ grid_search = GridSearchCV(
 )
 
 # Fit the grid search to the training data
-grid_search.fit(X_train_scaled, y_train)
+grid_search.fit(X_train_scaled, y_train, sample_weight=sample_weights)
 
 print("Best hyperparameters:", grid_search.best_params_)
 best_hidden_layers = grid_search.best_params_['hidden_layer_sizes']
@@ -74,6 +168,8 @@ best_alpha = grid_search.best_params_['alpha']
 best_lr_init = grid_search.best_params_['learning_rate_init']
 best_activation = grid_search.best_params_['activation']
 best_solver = grid_search.best_params_['solver']
+best_max_iter = grid_search.best_params_['max_iter']
+best_early_stopping = grid_search.best_params_['early_stopping']
 #best_learning_rate = grid_search.best_params_['learning_rate']
 print("Best hidden_layer_sizes:", best_hidden_layers)
 print("Best alpha:", best_alpha)
@@ -82,6 +178,10 @@ print("Best activation:", best_activation)
 print("Best solver:", best_solver)
 #print("Best learning_rate:", best_learning_rate)
 print("Best cross-validated score:", grid_search.best_score_)
+print("Best max_iter:", best_max_iter)
+print("best early_stopping:", best_early_stopping)
+
+#exit(1)
 
 
 #exit(1)
@@ -89,6 +189,7 @@ n_bootstrap = 1000
 k_folds = 5
 bootstrap_scores = []
 all_conf_matrices = []
+all_rocs = []
 
 for boot_iter in range(n_bootstrap):
     print(f"Bootstrap iteration {boot_iter+1}/{n_bootstrap}")
@@ -100,7 +201,15 @@ for boot_iter in range(n_bootstrap):
     fold_scores = []
     
     for train_idx, val_idx in kf.split(X_boot, y_boot):
-        X_tr, X_val = X_boot.iloc[train_idx], X_boot.iloc[val_idx]
+        #X_tr, X_val = X_boot.iloc[train_idx], X_boot.iloc[val_idx]
+
+        if isinstance(X_boot, pd.DataFrame):
+            X_tr, X_val = X_boot.iloc[train_idx], X_boot.iloc[val_idx]
+        elif isinstance(X_boot, np.ndarray):
+            X_tr, X_val = X_boot[train_idx], X_boot[val_idx]
+        else:
+            raise TypeError("X_boot must be a DataFrame or NumPy array")
+        
         y_tr, y_val = y_boot[train_idx], y_boot[val_idx]
 
         fold_sample_weights = compute_sample_weight('balanced', y_tr)
@@ -113,15 +222,18 @@ for boot_iter in range(n_bootstrap):
             activation=best_activation,
             solver=best_solver,
             #learning_rate=best_learning_rate,
-            max_iter=2000,
-            early_stopping=True,
-            random_state=boot_iter
+            max_iter=best_max_iter,
+            early_stopping=best_early_stopping,
         )
-        mlp.fit(X_tr, y_tr)
+        mlp.fit(X_tr, y_tr, sample_weight=fold_sample_weights)
 
         # Predict and score (ROC AUC recommended for imbalance)
         y_val_proba = mlp.predict_proba(X_val)[:, 1]
         y_val_pred = mlp.predict(X_val)
+
+        fpr, tpr, _ = roc_curve(y_val, y_val_proba)
+        all_rocs.append((fpr, tpr))
+
         try:
             score = roc_auc_score(y_val, y_val_proba)
         except ValueError:
@@ -157,6 +269,7 @@ sns.heatmap(norm_conf_matrix, annot=True, fmt=".2f",
             cmap='Blues', ax=ax)
 ax.set_xlabel('Predicted')
 ax.set_ylabel('True')
+plt.title('Average Cross Validation Confusion Matrix')
 plt.show()
 
 
@@ -168,11 +281,11 @@ best_model = MLPClassifier(
     activation=best_activation,
     solver=best_solver,
     #learning_rate=best_learning_rate,
-    max_iter=2000,
-    early_stopping=True,
-    random_state=boot_iter
+    max_iter=best_max_iter,
+    early_stopping=best_early_stopping,
+    random_state=42
 )
-best_model.fit(X_train_scaled, y_train)
+best_model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
 
 # Predict on holdout test set
 y_test_proba = best_model.predict_proba(X_test_scaled)[:, 1]
@@ -321,3 +434,156 @@ plt.show()
 
 # With the GHOST determined threshold we get near random results. This gives us a Confusion Matrix
 # that's more accurate considering the class imbalance
+
+# plt.figure(figsize=(10, 5))
+# plt.plot(bootstrap_scores, label="Bootstrap CV ROC AUC", alpha=0.7)
+# plt.axhline(test_roc_auc, color="red", linestyle="--", linewidth=2,
+#             label=f"Test ROC AUC = {test_roc_auc:.3f}")
+# plt.xlabel("Bootstrap iteration")
+# plt.ylabel("ROC AUC")
+# plt.title("Bootstrapped Cross-Validation AUC Across Resamples")
+# plt.legend()
+# plt.grid(True)
+# plt.show()
+
+
+
+# window = 50  # smoothing window
+# moving_avg = pd.Series(bootstrap_scores).rolling(window).mean()
+
+# plt.figure(figsize=(10, 5))
+# plt.plot(bootstrap_scores, alpha=0.3, label="Raw AUC")
+# plt.plot(moving_avg, color="black", linewidth=2, label=f"{window}-iter Moving Avg")
+# plt.axhline(test_roc_auc, color="red", linestyle="--",
+#             label=f"Test ROC AUC = {test_roc_auc:.3f}")
+# plt.xlabel("Bootstrap iteration")
+# plt.ylabel("ROC AUC")
+# plt.title("Smoothed Bootstrap AUC Curve")
+# plt.legend()
+# plt.grid(True)
+# plt.show()
+
+
+plt.figure(figsize=(8, 5))
+sns.histplot(bootstrap_scores, kde=True, bins=30, color="blue", alpha=0.6)
+plt.axvline(test_roc_auc, color="red", linestyle="--", linewidth=2,
+            label=f"Test ROC AUC = {test_roc_auc:.3f}")
+plt.xlabel("ROC AUC")
+plt.ylabel("Frequency")
+plt.title("Distribution of Bootstrapped Cross-Validation AUC")
+plt.legend()
+plt.show()
+
+# sorted_scores = np.sort(bootstrap_scores)
+# cdf = np.arange(1, len(sorted_scores)+1) / len(sorted_scores)
+
+# plt.figure(figsize=(8, 5))
+# plt.plot(sorted_scores, cdf, linewidth=2)
+# plt.axvline(test_roc_auc, color="red", linestyle="--", linewidth=2,
+#             label=f"Test ROC AUC = {test_roc_auc:.3f}")
+# plt.xlabel("ROC AUC")
+# plt.ylabel("Cumulative probability")
+# plt.title("ECDF of Bootstrapped AUC Values")
+# plt.grid(True)
+# plt.legend()
+# plt.show()
+
+
+plt.figure(figsize=(8, 6))
+
+# plot all bootstrap ROC curves
+for fpr, tpr in all_rocs:
+    plt.plot(fpr, tpr, color='blue', alpha=0.05)
+
+# mean ROC curve
+# interpolate curves onto a fixed FPR grid
+fpr_grid = np.linspace(0, 1, 200)
+tpr_interps = []
+
+for fpr, tpr in all_rocs:
+    tpr_interp = np.interp(fpr_grid, fpr, tpr)
+    tpr_interp[0] = 0.0
+    tpr_interps.append(tpr_interp)
+
+mean_tpr = np.mean(tpr_interps, axis=0)
+std_tpr = np.std(tpr_interps, axis=0)
+
+plt.plot(fpr_grid, mean_tpr, color='blue', linewidth=2,
+         label="Mean Bootstrapped ROC")
+
+# shaded confidence band
+plt.fill_between(fpr_grid,
+                 mean_tpr - std_tpr,
+                 mean_tpr + std_tpr,
+                 color='blue', alpha=0.2,
+                 label="±1 std. dev.")
+
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel("False Positive Rate (FPR)")
+plt.ylabel("True Positive Rate (TPR)")
+plt.title("Bootstrapped Cross-Validation ROC Curves")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Compute test ROC curve
+fpr_test, tpr_test, _ = roc_curve(y_test, y_test_proba)
+
+plt.figure(figsize=(8, 6))
+
+# plot mean CV ROC
+plt.plot(fpr_grid, mean_tpr, color='blue', linewidth=2, label="Mean CV ROC")
+plt.fill_between(fpr_grid, mean_tpr - std_tpr, mean_tpr + std_tpr,
+                 color='blue', alpha=0.2)
+
+# test ROC in red
+plt.plot(fpr_test, tpr_test, color='red', linewidth=3,
+         label=f"Test ROC (AUC={test_roc_auc:.3f})")
+
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel("False Positive Rate (FPR)")
+plt.ylabel("True Positive Rate (TPR)")
+plt.title("Cross-Validation vs Hold-Out Test ROC")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+# Test if your 0.797 AUC is seed-dependent
+print("Testing seed sensitivity of test set performance...")
+
+seed_test_scores = []
+for seed in range(50):  # Try 50 different seeds
+    model = MLPClassifier(
+        hidden_layer_sizes=best_hidden_layers,
+        alpha=best_alpha,
+        learning_rate_init=best_lr_init,
+        activation=best_activation,
+        solver=best_solver,
+        max_iter=best_max_iter,
+        early_stopping=best_early_stopping,
+    )
+    model.fit(X_train_scaled, y_train)
+    y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
+    auc = roc_auc_score(y_test, y_pred_proba)
+    seed_test_scores.append(auc)
+    
+print(f"AUC across 50 seeds:")
+print(f"  Mean: {np.mean(seed_test_scores):.4f}")
+print(f"  Std:  {np.std(seed_test_scores):.4f}")
+print(f"  Range: [{np.min(seed_test_scores):.4f}, {np.max(seed_test_scores):.4f}]")
+print(f"  Your original (seed=42): {seed_test_scores[42]:.4f}")
+
+# Plot distribution
+plt.figure(figsize=(10, 6))
+plt.hist(seed_test_scores, bins=20, alpha=0.7, edgecolor='black')
+plt.axvline(seed_test_scores[42], color='red', linestyle='--', linewidth=2,
+            label=f'seed=42 (your result): {seed_test_scores[42]:.4f}')
+plt.axvline(np.mean(seed_test_scores), color='green', linestyle='--', linewidth=2,
+            label=f'Mean: {np.mean(seed_test_scores):.4f}')
+plt.xlabel('Test Set AUC')
+plt.ylabel('Frequency')
+plt.title('Test Set Performance Across 50 Random Seeds')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.show()
