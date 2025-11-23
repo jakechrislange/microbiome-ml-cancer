@@ -107,12 +107,13 @@ param_grid = {
         (5,),       # Small single layer
         (10,),      # Slightly larger layer
         (5, 2),     # Two small layers
+        (10,2),
     ],
-    'alpha': [0.1, 1.0, 5.0, 10.0, 50.0],            # Strong regularization
-    'learning_rate_init': [0.00001,0.0001,0.0005, 0.001],           # Conservative rates for stability
-    'activation': ['relu'],                  # Try both non-linearities
-    'solver': ['lbfgs', 'adam'],                     # lbfgs (good for small data), adam (robust for larger)
-    'max_iter': [50, 75, 100], #200, 500],                          # Fewer epochs to avoid overfitting
+    'alpha': [0.1, 1.0, 5.0, 10.0],            # Strong regularization
+    'learning_rate_init': [0.0001,0.0005, 0.001],           # Conservative rates for stability
+    'activation': ['relu', 'tanh', 'logistic'],                  # Try both non-linearities
+    'solver': ['lbfgs', 'adam', 'sgd'],                     # lbfgs (good for small data), adam (robust for larger)
+    'max_iter': [25, 50, 75, 100], #200, 500],                          # Fewer epochs to avoid overfitting
     'early_stopping': [True],                        # Built-in validation for training stop
     # 'validation_fraction': [0.1, 0.2],               # Use decent holdout for early stopping
 }
@@ -180,8 +181,6 @@ print("Best solver:", best_solver)
 print("Best cross-validated score:", grid_search.best_score_)
 print("Best max_iter:", best_max_iter)
 print("best early_stopping:", best_early_stopping)
-
-#exit(1)
 
 
 #exit(1)

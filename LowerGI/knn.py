@@ -9,6 +9,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import calibration_curve
+from sklearn.metrics import roc_curve
 
 # Get dataset and split between train and test
 X, y, class_names, X_train, X_test, y_train, y_test, feature_names = get_dataset()
@@ -66,6 +67,8 @@ n_bootstrap = 1000
 k_folds = 5
 bootstrap_scores = []
 all_conf_matrices = []
+all_rocs = []
+
 
 for boot_iter in range(n_bootstrap):
     print(f"Bootstrap iteration {boot_iter+1}/{n_bootstrap}")
@@ -91,6 +94,10 @@ for boot_iter in range(n_bootstrap):
         # Predict and score (ROC AUC recommended for imbalance)
         y_val_proba = knn.predict_proba(X_val)[:, 1]
         y_val_pred = knn.predict(X_val)
+
+        fpr, tpr, _ = roc_curve(y_val, y_val_proba)
+        all_rocs.append((fpr, tpr))
+
         try:
             score = roc_auc_score(y_val, y_val_proba)
         except ValueError:
@@ -281,3 +288,87 @@ plt.show()
 
 # With threshold adjustment we see the impact on classification with KNN
 # This helps account for class imbalance and may reveal similarities between READ and COAD
+
+plt.figure(figsize=(8, 5))
+sns.histplot(bootstrap_scores, kde=True, bins=30, color="blue", alpha=0.6)
+plt.axvline(test_roc_auc, color="red", linestyle="--", linewidth=2,
+            label=f"Test ROC AUC = {test_roc_auc:.3f}")
+plt.xlabel("ROC AUC")
+plt.ylabel("Frequency")
+plt.title("Distribution of Bootstrapped Cross-Validation AUC")
+plt.legend()
+plt.show()
+
+# sorted_scores = np.sort(bootstrap_scores)
+# cdf = np.arange(1, len(sorted_scores)+1) / len(sorted_scores)
+
+# plt.figure(figsize=(8, 5))
+# plt.plot(sorted_scores, cdf, linewidth=2)
+# plt.axvline(test_roc_auc, color="red", linestyle="--", linewidth=2,
+#             label=f"Test ROC AUC = {test_roc_auc:.3f}")
+# plt.xlabel("ROC AUC")
+# plt.ylabel("Cumulative probability")
+# plt.title("ECDF of Bootstrapped AUC Values")
+# plt.grid(True)
+# plt.legend()
+# plt.show()
+
+
+plt.figure(figsize=(8, 6))
+
+# plot all bootstrap ROC curves
+for fpr, tpr in all_rocs:
+    plt.plot(fpr, tpr, color='blue', alpha=0.05)
+
+# mean ROC curve
+# interpolate curves onto a fixed FPR grid
+fpr_grid = np.linspace(0, 1, 200)
+tpr_interps = []
+
+for fpr, tpr in all_rocs:
+    tpr_interp = np.interp(fpr_grid, fpr, tpr)
+    tpr_interp[0] = 0.0
+    tpr_interps.append(tpr_interp)
+
+mean_tpr = np.mean(tpr_interps, axis=0)
+std_tpr = np.std(tpr_interps, axis=0)
+
+plt.plot(fpr_grid, mean_tpr, color='blue', linewidth=2,
+         label="Mean Bootstrapped ROC")
+
+# shaded confidence band
+plt.fill_between(fpr_grid,
+                 mean_tpr - std_tpr,
+                 mean_tpr + std_tpr,
+                 color='blue', alpha=0.2,
+                 label="±1 std. dev.")
+
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel("False Positive Rate (FPR)")
+plt.ylabel("True Positive Rate (TPR)")
+plt.title("Bootstrapped Cross-Validation ROC Curves")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Compute test ROC curve
+fpr_test, tpr_test, _ = roc_curve(y_test, y_test_proba)
+
+plt.figure(figsize=(8, 6))
+
+# plot mean CV ROC
+plt.plot(fpr_grid, mean_tpr, color='blue', linewidth=2, label="Mean CV ROC")
+plt.fill_between(fpr_grid, mean_tpr - std_tpr, mean_tpr + std_tpr,
+                 color='blue', alpha=0.2)
+
+# test ROC in red
+plt.plot(fpr_test, tpr_test, color='red', linewidth=3,
+         label=f"Test ROC (AUC={test_roc_auc:.3f})")
+
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel("False Positive Rate (FPR)")
+plt.ylabel("True Positive Rate (TPR)")
+plt.title("Cross-Validation vs Hold-Out Test ROC")
+plt.legend()
+plt.grid(True)
+plt.show()

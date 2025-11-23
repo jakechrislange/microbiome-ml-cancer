@@ -29,12 +29,14 @@ X_test_scaled = pd.DataFrame(
     index=X_test.index
 )
 
+from sklearn.utils.class_weight import compute_sample_weight
+sample_weights = compute_sample_weight('balanced', y_train)
 
 #Define parameter grid and perfrom grid search for hyperparameter selection
 param_grid = {
-    'C': [0.01, 0.1, 1, 10, 25],
-    'gamma': [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, "scale", "auto"],
-    'kernel': ['rbf']
+    'C': [0.01, 0.1, 1, 10, 25, 50],
+    'gamma': [0.00001, 0.0001, 0.001, "scale", "auto"],
+    'kernel': ['rbf', 'poly', 'linear', 'sigmoid']
 }
 
 cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -59,7 +61,7 @@ print("Best C:", best_c)
 print("Best gamma:", best_gamma)
 print("Best cross-validated score:", grid_search.best_score_)
 
-
+#exit(1)
 n_bootstrap = 1000
 k_folds = 5
 bootstrap_scores = []
@@ -79,6 +81,8 @@ for boot_iter in range(n_bootstrap):
         X_tr, X_val = X_boot.iloc[train_idx], X_boot.iloc[val_idx]
         y_tr, y_val = y_boot[train_idx], y_boot[val_idx]  # Regular numpy indexing
         
+        #fold_sample_weights = compute_sample_weight('balanced', y_tr)
+
         # Fit SVM on the bootstrap fold
         svm = SVC(kernel='rbf', gamma=best_gamma, C=best_c, probability=True, class_weight='balanced')
         svm.fit(X_tr, y_tr)
@@ -124,6 +128,7 @@ sns.heatmap(norm_conf_matrix, annot=True, fmt=".2f",
             yticklabels=["COAD", "READ"],
             cmap='Blues', ax=ax)
 ax.set_xlabel('Predicted')
+plt.title('Average Cross Validation Confusion Matrix')
 ax.set_ylabel('True')
 plt.show()
 

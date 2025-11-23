@@ -16,10 +16,15 @@ def plot_tsne(X, y, class_names, perplexity):
     plt.legend()
     plt.show()
 
-# plot_tsne(X, y, class_names, 3)
-# plot_tsne(X, y, class_names, 4)
-# plot_tsne(X, y, class_names, 5)
-# plot_tsne(X, y, class_names, 6)
+plot_tsne(X, y, class_names, 5)
+plot_tsne(X, y, class_names, 10)
+plot_tsne(X, y, class_names, 15)
+plot_tsne(X, y, class_names, 20)
+plot_tsne(X, y, class_names, 25)
+plot_tsne(X, y, class_names, 30)
+plot_tsne(X, y, class_names, 35)
+plot_tsne(X, y, class_names, 40)
+plot_tsne(X, y, class_names, 45)
 # plot_tsne(X, y, class_names, 7)
 # plot_tsne(X, y, class_names, 8)
 # plot_tsne(X, y, class_names, 9)
@@ -77,7 +82,7 @@ X_test_scaled = pd.DataFrame(
 )
 
 bayes_error_estimate = estimate_bayes_error_knn(X_train_scaled, y_train, k=1)
-print(f"Estimated Bayes Error Rate (kNN LOO error): {bayes_error_estimate:.4f}")
+print(f"Estimated Bayes Error Rate (kNN LOO error): {bayes_error_estimate:.4f}") # may need to divide by 2?
 
 # Estimated Bayes Error Rate (kNN LOO error): 0.3611
 #Your model’s achievable performance is fundamentally limited by these data characteristics, not just by model design or tuning.

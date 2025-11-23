@@ -9,6 +9,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import calibration_curve
+from sklearn.metrics import roc_curve
 
 # Get dataset and split between train and test
 X, y, class_names, X_train, X_test, y_train, y_test, feature_names = get_dataset()
@@ -28,14 +29,16 @@ X_test_scaled = pd.DataFrame(
     index=X_test.index
 )
 
+from sklearn.utils.class_weight import compute_sample_weight
+sample_weights = compute_sample_weight('balanced', y_train)
 
 # Define parameter grid for Logistic Regression
 param_grid = {
-    'C': [0.001, 0.01, 0.1, 1, 10, 100],
+    'C': [0.001, 0.01, 0.1, 1, 10],
     'penalty': ['l1', 'l2', 'elasticnet'],
-    'solver': ['saga'],  # saga supports all penalties
+    'solver': ['saga', 'lbfgs', 'liblinear', 'newton-cg'],  # saga supports all penalties
     'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9],  # only used with elasticnet
-    'max_iter': [1000]
+    'max_iter': [10, 25, 50, 100]
 }
 
 cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -56,12 +59,15 @@ grid_search.fit(X_train_scaled, y_train)
 print("Best hyperparameters:", grid_search.best_params_)
 print("Best cross-validated score:", grid_search.best_score_)
 
+#exit(1)
+
 best_params = grid_search.best_params_
 
 n_bootstrap = 1000
 k_folds = 5
 bootstrap_scores = []
 all_conf_matrices = []
+all_rocs = []
 
 for boot_iter in range(n_bootstrap):
     print(f"Bootstrap iteration {boot_iter+1}/{n_bootstrap}")
@@ -76,6 +82,8 @@ for boot_iter in range(n_bootstrap):
         X_tr, X_val = X_boot.iloc[train_idx], X_boot.iloc[val_idx]
         y_tr, y_val = y_boot[train_idx], y_boot[val_idx]
         
+        fold_sample_weights = compute_sample_weight('balanced', y_tr)
+
         # Fit Logistic Regression on the bootstrap fold
         lr = LogisticRegression(**best_params, random_state=boot_iter, class_weight='balanced')
         lr.fit(X_tr, y_tr)
@@ -83,6 +91,10 @@ for boot_iter in range(n_bootstrap):
         # Predict and score
         y_val_proba = lr.predict_proba(X_val)[:, 1]
         y_val_pred = lr.predict(X_val)
+
+        fpr, tpr, _ = roc_curve(y_val, y_val_proba)
+        all_rocs.append((fpr, tpr))
+
         try:
             score = roc_auc_score(y_val, y_val_proba)
         except ValueError:
@@ -118,7 +130,7 @@ sns.heatmap(norm_conf_matrix, annot=True, fmt=".2f",
             cmap='Blues', ax=ax)
 ax.set_xlabel('Predicted')
 ax.set_ylabel('True')
-plt.title('Bootstrap CV Confusion Matrix')
+plt.title('Average Cross Validation Confusion Matrix')
 plt.show()
 
 
@@ -265,3 +277,88 @@ for i, idx in enumerate(top_idx_coef, 1):
     genus_name = feature_names[idx]
     coef = coefficients[idx]
     print(f"{i}. {genus_name}: {coef:.4f} ({'READ' if coef > 0 else 'COAD'})")
+
+
+plt.figure(figsize=(8, 5))
+sns.histplot(bootstrap_scores, kde=True, bins=30, color="blue", alpha=0.6)
+plt.axvline(test_roc_auc, color="red", linestyle="--", linewidth=2,
+            label=f"Test ROC AUC = {test_roc_auc:.3f}")
+plt.xlabel("ROC AUC")
+plt.ylabel("Frequency")
+plt.title("Distribution of Bootstrapped Cross-Validation AUC")
+plt.legend()
+plt.show()
+
+# sorted_scores = np.sort(bootstrap_scores)
+# cdf = np.arange(1, len(sorted_scores)+1) / len(sorted_scores)
+
+# plt.figure(figsize=(8, 5))
+# plt.plot(sorted_scores, cdf, linewidth=2)
+# plt.axvline(test_roc_auc, color="red", linestyle="--", linewidth=2,
+#             label=f"Test ROC AUC = {test_roc_auc:.3f}")
+# plt.xlabel("ROC AUC")
+# plt.ylabel("Cumulative probability")
+# plt.title("ECDF of Bootstrapped AUC Values")
+# plt.grid(True)
+# plt.legend()
+# plt.show()
+
+
+plt.figure(figsize=(8, 6))
+
+# plot all bootstrap ROC curves
+for fpr, tpr in all_rocs:
+    plt.plot(fpr, tpr, color='blue', alpha=0.05)
+
+# mean ROC curve
+# interpolate curves onto a fixed FPR grid
+fpr_grid = np.linspace(0, 1, 200)
+tpr_interps = []
+
+for fpr, tpr in all_rocs:
+    tpr_interp = np.interp(fpr_grid, fpr, tpr)
+    tpr_interp[0] = 0.0
+    tpr_interps.append(tpr_interp)
+
+mean_tpr = np.mean(tpr_interps, axis=0)
+std_tpr = np.std(tpr_interps, axis=0)
+
+plt.plot(fpr_grid, mean_tpr, color='blue', linewidth=2,
+         label="Mean Bootstrapped ROC")
+
+# shaded confidence band
+plt.fill_between(fpr_grid,
+                 mean_tpr - std_tpr,
+                 mean_tpr + std_tpr,
+                 color='blue', alpha=0.2,
+                 label="±1 std. dev.")
+
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel("False Positive Rate (FPR)")
+plt.ylabel("True Positive Rate (TPR)")
+plt.title("Bootstrapped Cross-Validation ROC Curves")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Compute test ROC curve
+fpr_test, tpr_test, _ = roc_curve(y_test, y_test_proba)
+
+plt.figure(figsize=(8, 6))
+
+# plot mean CV ROC
+plt.plot(fpr_grid, mean_tpr, color='blue', linewidth=2, label="Mean CV ROC")
+plt.fill_between(fpr_grid, mean_tpr - std_tpr, mean_tpr + std_tpr,
+                 color='blue', alpha=0.2)
+
+# test ROC in red
+plt.plot(fpr_test, tpr_test, color='red', linewidth=3,
+         label=f"Test ROC (AUC={test_roc_auc:.3f})")
+
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel("False Positive Rate (FPR)")
+plt.ylabel("True Positive Rate (TPR)")
+plt.title("Cross-Validation vs Hold-Out Test ROC")
+plt.legend()
+plt.grid(True)
+plt.show()
